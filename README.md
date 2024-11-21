@@ -1,0 +1,2 @@
+# DiffusionWM
+Diffusionを利用しつつ高速で推論可能な世界モデルの実装を目指す。
