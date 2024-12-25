@@ -16,7 +16,6 @@ from tdmpc2 import TDMPC2
 
 torch.backends.cudnn.benchmark = True
 
-
 @hydra.main(config_name='config', config_path='.')
 def evaluate(cfg: dict):
 	"""
@@ -97,7 +96,6 @@ def evaluate(cfg: dict):
 			f'\tS: {ep_successes:.02f}', 'yellow'))
 	if cfg.multitask:
 		print(colored(f'Normalized score: {np.mean(scores):.02f}', 'yellow', attrs=['bold']))
-
 
 if __name__ == '__main__':
 	evaluate()

@@ -112,48 +112,43 @@ class NormedLinear(nn.Linear):
 			f"bias={self.bias is not None}{repr_dropout}, "\
 			f"act={self.act.__class__.__name__})"
 
-
-def mlp(in_dim, mlp_dims, out_dim, act=None, dropout=0.):
-	"""
-	Basic building block of TD-MPC2.
-	MLP with LayerNorm, Mish activations, and optionally dropout.
-	"""
-	if isinstance(mlp_dims, int):
-		mlp_dims = [mlp_dims]
-	dims = [in_dim] + mlp_dims + [out_dim]
-	mlp = nn.ModuleList()
-	for i in range(len(dims) - 2):
-		mlp.append(NormedLinear(dims[i], dims[i+1], dropout=dropout*(i==0)))
-	mlp.append(NormedLinear(dims[-2], dims[-1], act=act) if act else nn.Linear(dims[-2], dims[-1]))
-	return nn.Sequential(*mlp)
-
-
-def conv(in_shape, num_channels, act=None):
-	"""
-	Basic convolutional encoder for TD-MPC2 with raw image observations.
-	4 layers of convolution with ReLU activations, followed by a linear layer.
-	"""
-	assert in_shape[-1] == 64 # assumes rgb observations to be 64x64
-	layers = [
-		ShiftAug(), PixelPreprocess(),
-		nn.Conv2d(in_shape[0], num_channels, 7, stride=2), nn.ReLU(inplace=False),
-		nn.Conv2d(num_channels, num_channels, 5, stride=2), nn.ReLU(inplace=False),
-		nn.Conv2d(num_channels, num_channels, 3, stride=2), nn.ReLU(inplace=False),
-		nn.Conv2d(num_channels, num_channels, 3, stride=1), nn.Flatten()]
-	if act:
-		layers.append(act)
-	return nn.Sequential(*layers)
-
-
-def enc(cfg, out={}):
-	"""
-	Returns a dictionary of encoders for each observation in the dict.
-	"""
-	for k in cfg.obs_shape.keys():
-		if k == 'state':
-			out[k] = mlp(cfg.obs_shape[k][0] + cfg.task_dim, max(cfg.num_enc_layers-1, 1)*[cfg.enc_dim], cfg.latent_dim, act=SimNorm(cfg))
-		elif k == 'rgb':
-			out[k] = conv(cfg.obs_shape[k], cfg.num_channels, act=SimNorm(cfg))
+class MLP(nn.Module):
+	def __init__(self, in_dim, mlp_dims, out_dim, act=None, dropout=0.):
+		super().__init__()
+		if isinstance(mlp_dims, int):
+			mlp_dims = [mlp_dims]
+		dims = [in_dim] + mlp_dims + [out_dim]
+		modules = []
+		for i in range(len(dims) - 2):
+			modules.append(NormedLinear(dims[i], dims[i+1], dropout=dropout*(i==0)))
+		if act is not None:
+			modules.append(NormedLinear(dims[-2], dims[-1], act=act))
 		else:
-			raise NotImplementedError(f"Encoder for observation type {k} not implemented.")
-	return nn.ModuleDict(out)
+			modules.append(nn.Linear(dims[-2], dims[-1]))
+		self.net = nn.Sequential(*modules)
+
+	def forward(self, x):
+		return self.net(x)
+
+
+class Encoder(nn.Module):
+	def __init__(self, in_shape, num_channels, act=None):
+		super().__init__()
+		layers = [
+			ShiftAug(),
+			PixelPreprocess(),
+			nn.Conv2d(in_shape[0], num_channels, 7, 2),
+			nn.ReLU(inplace=False),
+			nn.Conv2d(num_channels, num_channels, 5, 2),
+			nn.ReLU(inplace=False),
+			nn.Conv2d(num_channels, num_channels, 3, 2),
+			nn.ReLU(inplace=False),
+			nn.Conv2d(num_channels, num_channels, 3, 1),
+			nn.Flatten()
+		]
+		if act is not None:
+			layers.append(act)
+		self.net = nn.Sequential(*layers)
+
+	def forward(self, x):
+		return self.net(x)
