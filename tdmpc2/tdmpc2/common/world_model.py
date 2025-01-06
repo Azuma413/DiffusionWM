@@ -21,11 +21,49 @@ class WorldModel(nn.Module):
 			self.register_buffer("_action_masks", torch.zeros(len(cfg.tasks), cfg.action_dim))
 			for i in range(len(cfg.tasks)):
 				self._action_masks[i, :cfg.action_dims[i]] = 1.
-		self._encoder = layers.enc(cfg)
-		self._dynamics = layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], cfg.latent_dim, act=layers.SimNorm(cfg))
-		self._reward = layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], max(cfg.num_bins, 1))
-		self._pi = layers.mlp(cfg.latent_dim + cfg.task_dim, 2*[cfg.mlp_dim], 2*cfg.action_dim)
-		self._Qs = layers.Ensemble([layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], max(cfg.num_bins, 1), dropout=cfg.dropout) for _ in range(cfg.num_q)])
+		# Encoder
+		enc_dict = {}
+		for k in cfg.obs_shape.keys():
+			if k == 'state':
+				enc_dict[k] = layers.MLP(
+					input_dim=cfg.obs_shape[k][0] + cfg.task_dim,
+					hidden_dims=[max(cfg.num_enc_layers-1, 1)*[cfg.enc_dim]],
+					output_dim=cfg.latent_dim,
+					activation=layers.SimNorm(cfg)
+				)
+			elif k == 'rgb':
+				enc_dict[k] = layers.Encoder(cfg)
+			else:
+				raise ValueError(f"Unknown observation type: {k}")
+		self._encoder = nn.ModuleDict(enc_dict)
+		# Dynamics
+		self._dynamics = layers.MLP(
+			input_dim=cfg.latent_dim + cfg.action_dim + cfg.task_dim,
+			hidden_dims=[cfg.mlp_dim, cfg.mlp_dim],
+			output_dim=cfg.latent_dim,
+			activation=layers.SimNorm(cfg)
+		)
+		# Reward, policy prior, Q-functions
+		self._reward = layers.MLP(
+			input_dim=cfg.latent_dim + cfg.action_dim + cfg.task_dim,
+			hidden_dims=[cfg.mlp_dim, cfg.mlp_dim],
+			output_dim=max(cfg.num_bins, 1)
+		)
+		self._pi = layers.MLP(
+			input_dim=cfg.latent_dim + cfg.task_dim,
+			hidden_dims=[cfg.mlp_dim, cfg.mlp_dim],
+			output_dim=2*cfg.action_dim
+		)
+		self._Qs = layers.Ensemble([
+			layers.MLP(
+				input_dim=cfg.latent_dim + cfg.action_dim + cfg.task_dim,
+				hidden_dims=[cfg.mlp_dim, cfg.mlp_dim],
+				output_dim=max(cfg.num_bins, 1),
+				dropout=cfg.dropout
+			)
+			for _ in range(cfg.num_q)
+		])
+
 		self.apply(init.weight_init)
 		init.zero_([self._reward[-1].weight, self._Qs.params["2", "weight"]])
 
